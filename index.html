@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
@@ -11,15 +12,21 @@
   <link rel="stylesheet" href="style.css">
   <script>
     // Registering our Service worker
-    if('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('sw.js', { scope: './' })
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations().then(function (registrations) {
+        for (let registration of registrations) {
+          registration.unregister();
+        }
+      });
     }
   </script>
 </head>
+
 <body>
   <div class="container">
     <canvas id="canvas" width="150" height="300"></canvas>
   </div>
   <script src="script.js"></script>
 </body>
+
 </html>

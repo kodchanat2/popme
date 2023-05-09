@@ -5,8 +5,18 @@
   "background_color": "#ddd",
   "display": "standalone",
   "Scope": "",
-  "start_url": "/index.html",
+  "start_url": "/popme",
   "icons": [
-    "./favicon.ico"
+    "./favicon.ico",
+    {
+      "src": "./favicon.ico",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "./favicon.ico",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
   ]
 }
