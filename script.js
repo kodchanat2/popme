@@ -9,6 +9,7 @@ const max_board = 5;
 const FPS = 60;
 const showFPS = false;
 const colors = ["#FFB81D", "#5AB6E2", "#8C46B9", "#4ED072", "#FF6A50"];
+const comboColors = ["#3dc06c", "#F7B15C", "#de129e", "#E5243F"]
 const state = {
   SPAWN: 0,
   MOVING: 1,
@@ -25,11 +26,15 @@ var screen_scale = 1;
 var lastCalledTime;
 var spawn_pool = [];
 var poping_pool = [];
+var combo_pool = [];
+var comboStrike = 0;
 var board = [[], [], []];
 var colTrigger = [0, 0, 0];
 var loading = false;
 var animating = false;
 var score = 0;
+var animateScore = 0;
+var scoreScale = 1;
 var highscore = 0;
 
 function init() {
@@ -39,11 +44,13 @@ function init() {
   // console.log(canvas.width, canvas.height, screen_scale);
   canvas.addEventListener("click", click);
   highscore = loadScore();
-  ctx.font = screen_scale * 7 + "px comic sans ms";
+  setFontSize();
   ctx.textBaseline = "top";
   fillSpawnPool();
   setInterval(update, 1000 / FPS);
 }
+
+setFontSize = (size = 7) => ctx.font = screen_scale * size + "px comic sans ms";
 
 var lastType = -1;
 function fillSpawnPool() {
@@ -89,6 +96,7 @@ async function update() {
   animating = false;
   drawBG();
   drawBalls();
+  drawCombos();
   if (!animating && loading)
     await checkBalls();
   loading = animating;
@@ -101,13 +109,18 @@ function drawBG() {
   ctx.fillStyle = grd;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
+  ctx.textAlign = "start";
   ctx.fillStyle = "black";
-  ctx.fillText("score: " + score, 2 * screen_scale, 7 * screen_scale);
-  ctx.scale(0.5, 0.5);
-  ctx.fillText("highscore: " + highscore, 4 * screen_scale, 6 * screen_scale);
-  ctx.scale(2, 2);
-
-  ctx.fillStyle = "black";
+  if (animateScore < score && scoreScale < 1.1) {
+    animateScore += Math.ceil((score - animateScore) / 10);
+    scoreScale = 1.2;
+  }
+  setFontSize(7 * scoreScale);
+  if (scoreScale > 1.001) scoreScale -= (scoreScale - 1) / 10;
+  ctx.fillText("score: " + animateScore, 2 * screen_scale, 7 * screen_scale);
+  setFontSize(3)
+  ctx.fillText("highscore: " + highscore, 2 * screen_scale, 3 * screen_scale);
+  setFontSize(10);
   ctx.fillText("↻", 92 * screen_scale, 2 * screen_scale);
 
   if (showFPS) {
@@ -160,6 +173,21 @@ function drawBG() {
   ctx.stroke();
 }
 
+function drawCombos() {
+  var order = 0;
+  for (let i = 0; i < combo_pool.length; i++) {
+    var point = combo_pool[i].update(i === combo_pool.length - 1);
+    if (point) {
+      ctx.textAlign = "start";
+      ctx.fillStyle = "black";
+      setFontSize(4);
+      ctx.fillText('+' + point, 2 * screen_scale, (13 + order++ * 5) * screen_scale);
+    }
+  }
+  combo_pool = combo_pool.filter(combo => combo.state !== state.MARKED);
+  if (!combo_pool.length) comboStrike = 0;
+}
+
 function drawBalls() {
   // draw spawn pool
   for (let i = 0; i < spawn_pool.length; i++) {
@@ -178,7 +206,7 @@ function drawBalls() {
 }
 
 async function checkBalls() {
-  console.log('check', spawn_pool.length, board.reduce((a, b) => a + b.length, 0), poping_pool.length)
+  // console.log('check', spawn_pool.length, board.reduce((a, b) => a + b.length, 0), poping_pool.length)
   // clear poping pool
   poping_pool = poping_pool.filter(ball => ball.state !== state.MARKED);
 
@@ -186,22 +214,21 @@ async function checkBalls() {
   for (let i = 0; i < board.length; i++) {
     for (let j = 0; j < board[i].length; j++) {
       let _ = await board[i][j].check();
-      if (_) combo.push([0, 0, 2, 5, 10, 20][_]);
+      if (_.strike) combo.push(_);
     }
   }
-  score += combo.reduce((a, b) => a + b, 0);
+  // if (!combo.length) comboStrike = 0;
+  comboStrike += combo.length;
+  for (let i = 0; i < combo.length; i++) {
+    // this.target.y = base_y - (ball_radius * 2 + ball_padding) * row;
+    // this.target.x = 100 * (col + 0.5) / 3;
+    var x = 100 * (Math.floor(combo[i].min / max_board) + Math.floor(combo[i].max / max_board) + 1) / 6;
+    var y = base_y - (ball_radius * 2 + ball_padding) * (combo[i].min % max_board + combo[i].max % max_board) / 2;
+    combo_pool.push(new Combo(Math.pow(2, comboStrike - 1), [0, 0, 2, 5, 10, 20, 50][combo[i].strike], x, y));
+  }
+  // score += combo.reduce((a, b) => a + b, 0);
   if (combo.length) {
-    // for (let i = 0; i < board.length; i++) {
-    //   for(let j = 0; j < board[i].length; j++) {
-
-    // }
-    board = board.map(col => col.filter(ball => ball.state !== state.POPING))
-    board.map(col => {
-      col.map((ball, index) => {
-        ball.set(state.MOVING, ball.col, index);
-      })
-      return col;
-    });
+    board = board.map(col => col.filter(ball => ball.state !== state.POPING).map((ball, index) => ball.set(state.MOVING, ball.col, index)));
     animating = true;
   }
   return Promise.resolve();
@@ -220,6 +247,7 @@ class Ball {
     this.speed = 0;
     this.col = index;
     this.row = -1;
+    this.order = 0;
     this.target = {
       x: 50,
       y: (ball_spawn_radius * 2 + ball_padding / 2) * (max_spawn - index),
@@ -232,6 +260,7 @@ class Ball {
     this.state = newState;
     this.col = col ?? this.col;
     this.row = row ?? this.row;
+    this.order = this.col * max_board + this.row;
     if (newState === state.SPAWN) {
       this.target.y = (this.size * 2 + ball_padding / 2) * (max_spawn - col);
     } else if (newState === state.IDLE) {
@@ -253,10 +282,17 @@ class Ball {
   async check() {
     var strike = 0;
     var found = false;
-    if (this.state !== state.IDLE) return Promise.resolve(0);
+    var min = this.order;
+    var max = this.order;
+    if (this.state !== state.IDLE) return Promise.resolve({ strike, min, max });
     this.state = state.MARKED;
     for (let [col, row] of [[0, -1], [0, 1], [-1, 0], [1, 0]]) {
-      strike += await checkForiegn(this.col + col, this.row + row, this.type);
+      var { strike: _strike, min: _min, max: _max } = await checkForiegn(this.col + col, this.row + row, this.type);
+      strike += _strike;
+      if (_strike) {
+        min = Math.min(min, _min);
+        max = Math.max(max, _max);
+      }
     }
     if (found) {
       this.set(state.POPING);
@@ -265,14 +301,14 @@ class Ball {
     }
     else this.state = state.IDLE;
 
-    return Promise.resolve(strike);
+    return Promise.resolve({ strike, min, max });
 
     async function checkForiegn(col, row, type) {
       if (board[col]?.[row]?.type === type) {
         found = true;
         return board[col][row].check();
       }
-      return Promise.resolve(0);
+      return Promise.resolve({ strike: 0, min: 0, max: 0 });
     }
   }
 
@@ -322,6 +358,99 @@ class Ball {
       if (this.alpha <= 0) {
         this.alpha = 0;
         return this.state = state.MARKED;
+      }
+    }
+  }
+}
+
+class Combo {
+  constructor(combo, amount, x, y) {
+    this.combo = combo;
+    this.amount = amount;
+    this.text = this.text(combo);
+    this.color = comboColors[combo < 4 ? 0 : combo < 8 ? 1 : combo < 16 ? 2 : 3];
+    this.x = x;
+    this.y = y + 2;
+    this.targetY = y;
+    this.alpha = 0;
+    this.scale = 0;
+    this.targetScale = 1;
+    this.state = state.SPAWN;
+    score += this.amount * this.combo;
+  }
+
+  text(combo) {
+    switch (combo) {
+      case 2: return ["combo", "cool", "great", "nice", "👍🏽"][Math.floor(Math.random() * 5)];
+      case 4: return ["perfect", "awesome", "amazing", "wow", "⭐️⭐️⭐️"][Math.floor(Math.random() * 5)];
+      case 8: return ["fantastic", "excellent", "💯💯💯", "wonderful", "epic"][Math.floor(Math.random() * 5)];
+      case 16: return ["unbelievable", "🔥 🔥 🔥", "insane", "crazy", "impossible"][Math.floor(Math.random() * 5)];
+      default: return ["fever", "legendary", "godlike", "master", "extrodinary", "superior", "ultimate", "hackerman", "😱😱😱😱😱", "💀💀💀💀💀"][Math.floor(Math.random() * 10)];
+    }
+  }
+
+  update(isShowCombo) {
+    this.calculatePosition();
+    ctx.textAlign = "center";
+    this.drawAmount();
+    this.drawCombo(isShowCombo);
+    return this.state === state.MARKED ? 0 : this.amount * this.combo;
+  }
+
+  drawAmount() {
+    ctx.beginPath();
+    ctx.fillStyle = "white";
+    ctx.globalAlpha = this.alpha;
+    setFontSize(10 * this.scale);
+    ctx.fillText('+' + this.amount, this.x * screen_scale, this.y * screen_scale);
+    ctx.globalAlpha = 1;
+  }
+
+  drawCombo(isShowCombo) {
+    if (this.combo < 2 || !isShowCombo) return;
+    // console.log(this.combo)
+    ctx.beginPath();
+    ctx.fillStyle = this.color;
+    setFontSize(9);
+    ctx.strokeStyle = "white";
+    ctx.lineWidth = 1;
+    ctx.fillText(this.text + ' x' + this.combo, 50 * screen_scale, 60 * screen_scale);
+    ctx.strokeText(this.text + ' x' + this.combo, 50 * screen_scale, 60 * screen_scale);
+  }
+
+  calculatePosition() {
+    if (this.state === state.SPAWN) {
+      this.alpha += 0.2;
+      this.y -= (this.y - this.targetY) / 5;
+      this.scale += (this.targetScale - this.scale) / 5;
+      if (this.alpha >= 1) {
+        this.alpha = 1;
+        this.y = this.targetY;
+        this.scale = this.targetScale;
+        this.targetY = this.y - 1;
+        this.targetScale *= 1.5;
+        this.state = state.IDLE;
+      }
+    } else if (this.state === state.IDLE) {
+      this.y -= (this.y - this.targetY) / 10;
+      this.scale += (this.targetScale - this.scale) / 10;
+      if (this.y <= this.targetY + 0.1) {
+        this.y = this.targetY;
+        this.scale = this.targetScale;
+        this.targetY = this.y - 1;
+        this.state = state.POPING;
+      }
+    } else if (this.state === state.POPING) {
+      this.scale -= 0.01;
+      if (this.alpha <= 0) {
+        this.alpha = 0;
+        this.y = this.targetY;
+      } else {
+        this.alpha -= 0.1;
+        this.y -= (this.y - this.targetY) / 2;
+      }
+      if (this.scale <= 0) {
+        this.state = state.MARKED;
       }
     }
   }
